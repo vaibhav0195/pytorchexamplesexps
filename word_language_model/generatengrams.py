@@ -17,7 +17,7 @@ parser.add_argument('--checkpoint', type=str, default='/home/yoda/data/textmaski
                     help='model checkpoint to use')
 parser.add_argument('--outf', type=str, default='generated.txt',
                     help='output file for generated text')
-parser.add_argument('--words', type=int, default='100',
+parser.add_argument('--words', type=int, default='1000',
                     help='number of words to generate')
 parser.add_argument('--seed', type=int, default=1111,
                     help='random seed')
@@ -46,15 +46,17 @@ model.eval()
 
 corpus = data.Corpus(args.data,eval="/home/yoda/data/textmasking/models/trainedpytorch/idx2word.json")
 ntokens = len(corpus.dictionary)
-
+print(ntokens)
 is_transformer_model = hasattr(model, 'model_type') and model.model_type == 'Transformer'
 if not is_transformer_model:
     hidden = model.init_hidden(1)
 
-inpSentence = "various types of ca however its role in"
+inpSentence = "tumor suppressor gene in various types of ca however its role in MASKTOKEN remains poorly"
 input = [corpus.dictionary.word2idx[word] for word in inpSentence.split(" ")]
 # input = torch.randint(ntokens, (1, 1), dtype=torch.long).to(device)
-input = torch.LongTensor(input).to(device).view(1,-1)
+# the 2nd dimension is the batch. this is how this model was trained some design decision at pytorch to improve the speed.
+input = torch.LongTensor(input).to(device).view(-1,1)
+orignalsize = input.size(0)
 
 with open(args.outf, 'w') as outf:
     with torch.no_grad():  # no tracking history
@@ -67,13 +69,20 @@ with open(args.outf, 'w') as outf:
                 input = torch.cat([input, word_tensor], 0)
             else:
                 output, hidden = model(input, hidden)
+                # p = torch.nn.functional.softmax(output, dim=1).detach().numpy()
+                # word_index = np.random.choice(len(last_word_logits), p=p)
                 word_weights = output.squeeze().div(args.temperature).exp().cpu()
                 word_idx = torch.multinomial(word_weights, 1)[0]
-                # input.fill_(word_idx)
+                # put the new word idx at the end of input
+                word_idx = word_idx.to(device)
+                input = torch.cat((input,word_idx.view(1,1)),dim=0)
+                # slice the input from the first to the new word
+                input = input[1:orignalsize,:]
 
             word = corpus.dictionary.idx2word[word_idx]
 
-            outf.write(word + ('\n' if i % 20 == 19 else ' '))
+            # outf.write(word + ('\n' if i % 20 == 19 else ' '))
+            outf.write(word + ('\n' if "eos" in word else ' '))
 
             if i % args.log_interval == 0:
                 print('| Generated {}/{} words'.format(i, args.words))

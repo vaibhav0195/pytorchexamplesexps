@@ -1,4 +1,3 @@
-# coding: utf-8
 import argparse
 import time
 import math
@@ -96,11 +95,13 @@ val_data = batchify(corpus.valid, eval_batch_size)
 ###############################################################################
 
 ntokens = len(corpus.dictionary)
-if args.model == 'Transformer':
-    model = model.TransformerModel(ntokens, args.emsize, args.nhead, args.nhid, args.nlayers, args.dropout).to(device)
-else:
-    model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers, args.dropout, args.tied).to(device)
-
+with open(args.save, 'rb') as f:
+    model = torch.load(f)
+    # after load the rnn params are not a continuous chunk of memory
+    # this makes them a continuous chunk, and will speed up forward pass
+    # Currently, only rnn model supports flatten_parameters function.
+    if args.model in ['RNN_TANH', 'RNN_RELU', 'LSTM', 'GRU']:
+        model.rnn.flatten_parameters()
 criterion = nn.NLLLoss()
 
 ###############################################################################
@@ -137,6 +138,9 @@ def evaluate(data_source):
     # Turn on evaluation mode which disables dropout.
     model.eval()
     total_loss = 0.
+    correct = 0
+    total_test_words = 0
+
     ntokens = len(corpus.dictionary)
     if args.model != 'Transformer':
         hidden = model.init_hidden(eval_batch_size)
@@ -150,104 +154,15 @@ def evaluate(data_source):
                 output, hidden = model(data, hidden)
                 hidden = repackage_hidden(hidden)
             total_loss += len(data) * criterion(output, targets).item()
-    return total_loss / (len(data_source) - 1)
+            # output_flat = output.view(-1, ntokens)
+            total_loss += len(data) * torch.nn.functional.cross_entropy(output, targets).data
+            hidden = tuple([each.data for each in hidden])
+            pred = output.data.max(1)[1]
+            correct += pred.eq(targets.data).sum().to(dtype=torch.float)
+            total_test_words += targets.data.shape[0]
+    retLoss = total_loss / (len(data_source) - 1)
+    acc = 100.0 * (correct / total_test_words)
+    print("Accuracy of the model {} and loss {}".format(acc,retLoss))
+    return retLoss
 
-
-def train():
-    # Turn on training mode which enables dropout.
-    model.train()
-    numParam = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print("total parameters {}".format(numParam))
-    total_loss = 0.
-    start_time = time.time()
-    ntokens = len(corpus.dictionary)
-    if args.model != 'Transformer':
-        hidden = model.init_hidden(args.batch_size)
-    for batch, i in enumerate(range(0, train_data.size(0) - 1, args.bptt)):
-        data, targets = get_batch(train_data, i)
-        # Starting each batch, we detach the hidden state from how it was previously produced.
-        # If we didn't, the model would try backpropagating all the way to start of the dataset.
-        model.zero_grad()
-        if args.model == 'Transformer':
-            output = model(data)
-            output = output.view(-1, ntokens)
-        else:
-            hidden = repackage_hidden(hidden)
-            output, hidden = model(data, hidden)
-        loss = criterion(output, targets)
-        loss.backward()
-
-        # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
-        torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
-        for p in model.parameters():
-            p.data.add_(p.grad, alpha=-lr)
-
-        total_loss += loss.item()
-
-        if batch % args.log_interval == 0 and batch > 0:
-            cur_loss = total_loss / args.log_interval
-            elapsed = time.time() - start_time
-            print('| epoch {:3d} | {:5d}/{:5d} batches | lr {:02.2f} | ms/batch {:5.2f} | '
-                    'loss {:5.2f} | ppl {:8.2f}'.format(
-                epoch, batch, len(train_data) // args.bptt, lr,
-                elapsed * 1000 / args.log_interval, cur_loss, math.exp(cur_loss)))
-            total_loss = 0
-            start_time = time.time()
-        if args.dry_run:
-            break
-
-
-def export_onnx(path, batch_size, seq_len):
-    print('The model is also exported in ONNX format at {}.'.format(os.path.realpath(args.onnx_export)))
-    model.eval()
-    dummy_input = torch.LongTensor(seq_len * batch_size).zero_().view(-1, batch_size).to(device)
-    hidden = model.init_hidden(batch_size)
-    torch.onnx.export(model, (dummy_input, hidden), path)
-
-
-# Loop over epochs.
-lr = args.lr
-best_val_loss = None
-
-# At any point you can hit Ctrl + C to break out of training early.
-try:
-    for epoch in range(1, args.epochs+1):
-        epoch_start_time = time.time()
-        train()
-        val_loss = evaluate(val_data)
-        print('-' * 89)
-        print('| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | '
-                'valid ppl {:8.2f}'.format(epoch, (time.time() - epoch_start_time),
-                                           val_loss, math.exp(val_loss)))
-        print('-' * 89)
-        # Save the model if the validation loss is the best we've seen so far.
-        if not best_val_loss or val_loss < best_val_loss:
-            with open(args.save, 'wb') as f:
-                torch.save(model, f)
-            best_val_loss = val_loss
-        else:
-            # Anneal the learning rate if no improvement has been seen in the validation dataset.
-            lr /= 4.0
-except KeyboardInterrupt:
-    print('-' * 89)
-    print('Exiting from training early')
-
-# Load the best saved model.
-with open(args.save, 'rb') as f:
-    model = torch.load(f)
-    # after load the rnn params are not a continuous chunk of memory
-    # this makes them a continuous chunk, and will speed up forward pass
-    # Currently, only rnn model supports flatten_parameters function.
-    if args.model in ['RNN_TANH', 'RNN_RELU', 'LSTM', 'GRU']:
-        model.rnn.flatten_parameters()
-
-# Run on test data.
-test_loss = evaluate(val_data)
-print('=' * 89)
-print('| End of training | test loss {:5.2f} | test ppl {:8.2f}'.format(
-    test_loss, math.exp(test_loss)))
-print('=' * 89)
-
-if len(args.onnx_export) > 0:
-    # Export the model in ONNX format.
-    export_onnx(args.onnx_export, batch_size=1, seq_len=args.bptt)
+_ = evaluate(val_data)
