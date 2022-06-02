@@ -106,7 +106,7 @@ class CorpusMaskLeak(object):
                             wordsToConsider = wordsList[idx - numletters + 1:idx]
                             for tword in wordsToConsider:
                                 self.dictionary.add_word(tword)
-                            for tword in abbr[words].lower():
+                            for tword in abbr[words].lower().split():
                                 self.dictionary.add_word(tword)
                             strWords = ' '.join([str(elem) for elem in wordsToConsider])
                             sentLabel.append([strWords + " " + maskToken, abbr[words].lower()])
@@ -124,6 +124,7 @@ class CorpusMaskLeak(object):
 
         maskToken = "<eos>"
         sentLab = getMaskedInp(validDataLines,abbr,maskToken,numWords)
+        self.dictionary.add_word(maskToken)
         idss = []
         oIdss = []
         for line,op in sentLab:

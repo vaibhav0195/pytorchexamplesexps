@@ -91,9 +91,9 @@ def batchify(data, bsz):
     return data.to(device)
 
 eval_batch_size = 10
-ids,oids = corpus.getMaskSentPair(args.wordmapJson,args.datapath,args.bptt)
-val_data = batchify(ids, eval_batch_size)
-val_data_output = batchify(oids, eval_batch_size)
+valid_data,valid_data_output = corpus.getMaskSentPair(args.wordmapJson,args.datapath,args.bptt)
+# val_data = batchify(ids, eval_batch_size)
+# val_data_output = batchify(oids, eval_batch_size)
 # test_data = batchify(corpus.test, eval_batch_size)
 
 ###############################################################################
@@ -145,7 +145,7 @@ def get_batch_masked(source,output, i):
     return data, target
 
 
-def evaluate(data_source):
+def evaluate(data_source,out_source):
     # Turn on evaluation mode which disables dropout.
     model.eval()
     total_loss = 0.
@@ -157,8 +157,11 @@ def evaluate(data_source):
         hidden = model.init_hidden(eval_batch_size)
     with torch.no_grad():
         # for i in range(0, data_source.size(0) - 1, args.bptt):
-        for i in range(0, data_source.size(1) - 1, eval_batch_size):
-            data, targets = get_batch_masked(data_source, i)
+        for i in range(0, data_source.size(0), eval_batch_size):
+            data = data_source[i:i+eval_batch_size]
+            data = data.view(eval_batch_size, -1).t().contiguous().to(device)
+            targets = out_source[i:i+eval_batch_size]
+            targets = targets.view(eval_batch_size, -1).t().contiguous().to(device)
             if args.model == 'Transformer':
                 output = model(data)
                 output = output.view(-1, ntokens)
@@ -177,4 +180,4 @@ def evaluate(data_source):
     print("Accuracy of the model {} and loss {}".format(acc,retLoss))
     return retLoss
 
-_ = evaluate(val_data)
+_ = evaluate(valid_data,valid_data_output)
