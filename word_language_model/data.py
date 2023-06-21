@@ -76,7 +76,7 @@ class CorpusRedacted(object):
         self.valid = self.tokenize_redacted(valSent)
 
     def getSentences(self,path):
-        sentOutPair = np.load(path, allow_pickle=True)
+        sentOutPair = np.load(path+"/sentOut.npy", allow_pickle=True)
         sents = []
         for sentIp, gtSentiment, predictedSentiment, actualSent in sentOutPair:
             if gtSentiment == 0:
