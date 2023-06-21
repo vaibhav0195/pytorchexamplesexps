@@ -11,7 +11,7 @@ import data
 import model
 
 parser = argparse.ArgumentParser(description='PyTorch Wikitext-2 RNN/LSTM/GRU/Transformer Language Model')
-parser.add_argument('--data', type=str, default='/home/yoda/data/textmasking/data',
+parser.add_argument('--data', type=str, default='/home/vaibhav/ML/bartexps/smartMaskingValidationMedal',
                     help='location of the data corpus')
 parser.add_argument('--model', type=str, default='LSTM',
                     help='type of network (RNN_TANH, RNN_RELU, LSTM, GRU, Transformer)')
@@ -106,19 +106,19 @@ def get_batch(source, i):
 
 def evaluate(data_source):
     # Turn on evaluation mode which disables dropout.
-    model.eval()
+    modelInst.eval()
     total_loss = 0.
     ntokens = len(corpus.dictionary)
     if args.model != 'Transformer':
-        hidden = model.init_hidden(eval_batch_size)
+        hidden = modelInst.init_hidden(eval_batch_size)
     with torch.no_grad():
         for i in range(0, data_source.size(0) - 1, args.bptt):
             data, targets = get_batch(data_source, i)
             if args.model == 'Transformer':
-                output = model(data)
+                output = modelInst(data)
                 output = output.view(-1, ntokens)
             else:
-                output, hidden = model(data, hidden)
+                output, hidden = modelInst(data, hidden)
                 hidden = repackage_hidden(hidden)
             total_loss += len(data) * criterion(output, targets).item()
     return total_loss / (len(data_source) - 1)
@@ -126,31 +126,31 @@ def evaluate(data_source):
 
 def train():
     # Turn on training mode which enables dropout.
-    model.train()
-    numParam = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    modelInst.train()
+    numParam = sum(p.numel() for p in modelInst.parameters() if p.requires_grad)
     print("total parameters {}".format(numParam))
     total_loss = 0.
     start_time = time.time()
     ntokens = len(corpus.dictionary)
     if args.model != 'Transformer':
-        hidden = model.init_hidden(args.batch_size)
+        hidden = modelInst.init_hidden(args.batch_size)
     for batch, i in enumerate(range(0, train_data.size(0) - 1, args.bptt)):
         data, targets = get_batch(train_data, i)
         # Starting each batch, we detach the hidden state from how it was previously produced.
         # If we didn't, the model would try backpropagating all the way to start of the dataset.
-        model.zero_grad()
+        modelInst.zero_grad()
         if args.model == 'Transformer':
-            output = model(data)
+            output = modelInst(data)
             output = output.view(-1, ntokens)
         else:
             hidden = repackage_hidden(hidden)
-            output, hidden = model(data, hidden)
+            output, hidden = modelInst(data, hidden)
         loss = criterion(output, targets)
         loss.backward()
 
         # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
-        torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
-        for p in model.parameters():
+        torch.nn.utils.clip_grad_norm_(modelInst.parameters(), args.clip)
+        for p in modelInst.parameters():
             p.data.add_(p.grad, alpha=-lr)
 
         total_loss += loss.item()
@@ -170,10 +170,10 @@ def train():
 
 def export_onnx(path, batch_size, seq_len):
     print('The model is also exported in ONNX format at {}.'.format(os.path.realpath(args.onnx_export)))
-    model.eval()
+    modelInst.eval()
     dummy_input = torch.LongTensor(seq_len * batch_size).zero_().view(-1, batch_size).to(device)
-    hidden = model.init_hidden(batch_size)
-    torch.onnx.export(model, (dummy_input, hidden), path)
+    hidden = modelInst.init_hidden(batch_size)
+    torch.onnx.export(modelInst, (dummy_input, hidden), path)
 
 
 # Set the random seed manually for reproducibility.
@@ -190,8 +190,9 @@ device = torch.device("cuda" if args.cuda else "cpu")
 
 for maskPerc in os.listdir(args.data):
     datadir = args.data+"/"+maskPerc
-    saveDir = args.save+"/"+maskPerc
+    saveDir = args.data.split("/")[-1]+"/"+maskPerc
     os.makedirs(saveDir,exist_ok=True)
+    savePath = saveDir+"/"+args.save
     corpus = data.CorpusRedacted(datadir)
 
     eval_batch_size = 10
@@ -205,9 +206,9 @@ for maskPerc in os.listdir(args.data):
 
     ntokens = len(corpus.dictionary)
     if args.model == 'Transformer':
-        model = model.TransformerModel(ntokens, args.emsize, args.nhead, args.nhid, args.nlayers, args.dropout).to(device)
+        modelInst = model.TransformerModel(ntokens, args.emsize, args.nhead, args.nhid, args.nlayers, args.dropout).to(device)
     else:
-        model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers, args.dropout, args.tied).to(device)
+        modelInst = model.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers, args.dropout, args.tied).to(device)
 
     criterion = nn.NLLLoss()
 
@@ -228,8 +229,8 @@ for maskPerc in os.listdir(args.data):
             print('-' * 89)
             # Save the model if the validation loss is the best we've seen so far.
             if not best_val_loss or val_loss < best_val_loss:
-                with open(saveDir, 'wb') as f:
-                    torch.save(model, f)
+                with open(savePath, 'wb') as f:
+                    torch.save(modelInst, f)
                 best_val_loss = val_loss
             else:
                 # Anneal the learning rate if no improvement has been seen in the validation dataset.
@@ -241,13 +242,13 @@ for maskPerc in os.listdir(args.data):
     # print()
 
     # Load the best saved model.
-    with open(saveDir, 'rb') as f:
-        model = torch.load(f)
+    with open(savePath, 'rb') as f:
+        modelInst = torch.load(f)
         # after load the rnn params are not a continuous chunk of memory
         # this makes them a continuous chunk, and will speed up forward pass
         # Currently, only rnn model supports flatten_parameters function.
         if args.model in ['RNN_TANH', 'RNN_RELU', 'LSTM', 'GRU']:
-            model.rnn.flatten_parameters()
+            modelInst.rnn.flatten_parameters()
 
     # Run on test data.
     test_loss = evaluate(val_data)
