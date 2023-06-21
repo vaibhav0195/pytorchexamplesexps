@@ -238,6 +238,8 @@ for maskPerc in os.listdir(args.data):
         print('-' * 89)
         print('Exiting from training early')
 
+    # print()
+
     # Load the best saved model.
     with open(saveDir, 'rb') as f:
         model = torch.load(f)
@@ -250,8 +252,8 @@ for maskPerc in os.listdir(args.data):
     # Run on test data.
     test_loss = evaluate(val_data)
     print('=' * 89)
-    print('| End of training | test loss {:5.2f} | test ppl {:8.2f}'.format(
-        test_loss, math.exp(test_loss)))
+    print('| End of training | |test loss {:5.2f} | test ppl {:8.2f} | mask perc'.format(
+        test_loss, math.exp(test_loss)),maskPerc)
     print('=' * 89)
 
     # if len(args.onnx_export) > 0:
