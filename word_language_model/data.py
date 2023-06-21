@@ -1,6 +1,9 @@
 import os
 from io import open
 import torch
+import numpy as np
+from sklearn.model_selection import train_test_split
+import random
 
 class Dictionary(object):
     def __init__(self):
@@ -62,6 +65,49 @@ class Corpus(object):
                     ids.append(self.dictionary.word2idx[word])
                 idss.append(torch.tensor(ids).type(torch.int64))
             ids = torch.cat(idss)
+
+        return ids
+
+class CorpusRedacted(object):
+    def __init__(self, path):
+        self.dictionary = Dictionary()
+        trainSent, valSent = self.getSentences(path)
+        self.train = self.tokenize_redacted(trainSent)
+        self.valid = self.tokenize_redacted(valSent)
+
+    def getSentences(self,path):
+        sentOutPair = np.load(path, allow_pickle=True)
+        sents = []
+        for sentIp, gtSentiment, predictedSentiment, actualSent in sentOutPair:
+            if gtSentiment == 0:
+                sents.append(sentIp)
+
+        random.shuffle(sents)
+        numSents = len(sents)
+        numValSents = int(numSents*0.1)
+        return sents[numValSents:],sents[:numValSents]
+
+    def tokenize_redacted(self, sentences):
+        """Tokenizes a text file."""
+        # assert os.path.exists(path)
+        # Add words to the dictionary
+        # sentOutPair = np.load(path, allow_pickle=True)
+        for sentIp in sentences:
+            words = sentIp.split() + ['<eos>']
+            for word in words:
+                self.dictionary.add_word(word)
+
+
+        # Tokenize file content
+        idss = []
+        for sentIp in sentences:
+            # if gtSentiment == 0:
+            words = sentIp.split() + ['<eos>']
+            ids = []
+            for word in words:
+                ids.append(self.dictionary.word2idx[word])
+            idss.append(torch.tensor(ids).type(torch.int64))
+        ids = torch.cat(idss)
 
         return ids
 
